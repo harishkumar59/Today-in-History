@@ -10,6 +10,7 @@
     "deploy": "next build && vercel --prod"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "date-fns": "^3.6.0",
     "framer-motion": "^11.3.31",
     "lucide-react": "^0.436.0",
