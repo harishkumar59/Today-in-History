@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 
 export const runtime = "nodejs";
 
-// Fallback key matches what's already public in vercel.json
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyA-f1ZAcNvUpH4jBuwqLJaBzTDvnQWC8q8';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 // Fallback model chain — each has a separate free-tier quota
