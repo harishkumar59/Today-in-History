@@ -3,11 +3,11 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const runtime = 'nodejs';
 
-// Model fallback chain – tried in order on rate-limit (429)
+// Model fallback chain – tried in order on quota/rate-limit errors
 const MODEL_CHAIN = [
   process.env.GEMINI_MODEL || 'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-1.0-pro',
+  'gemini-pro',
+  'gemini-1.5-pro',
 ];
 
 type Message = {
@@ -64,8 +64,14 @@ Make your response engaging, educational, and well-formatted.`;
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`Model ${modelName} failed: ${message}`);
 
-      // 429 = rate limited → try next model
-      if (message.includes('429') || message.toLowerCase().includes('quota')) {
+      // 429 / 404 / quota errors → try next model
+      if (
+        message.includes('429') ||
+        message.includes('404') ||
+        message.toLowerCase().includes('quota') ||
+        message.toLowerCase().includes('not found')
+      ) {
+        console.warn(`Skipping model ${modelName}, trying next...`);
         continue;
       }
 
