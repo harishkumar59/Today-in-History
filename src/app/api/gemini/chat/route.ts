@@ -1,56 +1,40 @@
 import { NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-export const runtime = "nodejs";
+export const runtime = 'nodejs';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-
-// Fallback model chain — each has a separate free-tier quota
-// If one hits 429 the next one is tried automatically
+// Model fallback chain – tried in order on rate-limit (429)
 const MODEL_CHAIN = [
   process.env.GEMINI_MODEL || 'gemini-1.5-flash',
   'gemini-1.5-flash-8b',
   'gemini-1.0-pro',
 ];
 
-// Define message type
 type Message = {
   role: string;
   content: string;
 };
 
-/**
- * Try calling a single Gemini model. Returns the Response object so the
- * caller can inspect the status code and decide whether to fall through.
- */
-async function callModel(model: string, body: object, signal: AbortSignal): Promise<Response> {
-  const url = `${API_BASE}/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-  console.log(`Trying model: ${model}`);
-  return fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal,
-  });
-}
-
 export async function POST(req: Request) {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'GEMINI_API_KEY is not set in environment variables.' },
+      { status: 500 }
+    );
+  }
+
+  let messages: Message[];
   try {
-    // ── Guard: API key ─────────────────────────────────────────────────────────
-    if (!GEMINI_API_KEY) {
-      console.error('Missing Gemini API key in environment variables');
-      return NextResponse.json(
-        { error: 'API key is not configured. Please add GEMINI_API_KEY to your environment variables.' },
-        { status: 500 }
-      );
-    }
+    ({ messages } = await req.json());
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 });
+  }
 
-    const { messages }: { messages: Message[] } = await req.json();
-    const dateQuery = messages[messages.length - 1].content;
+  const dateQuery = messages[messages.length - 1]?.content ?? '';
 
-    // ── Build prompt ───────────────────────────────────────────────────────────
-    const historyPrompt = `
-You are a history expert AI assistant. A user is asking about historical events that happened on a specific date.
+  const prompt = `You are a history expert AI assistant. A user is asking about historical events that happened on a specific date.
 
 Query: "${dateQuery}"
 
@@ -61,122 +45,41 @@ Respond with 3-5 significant historical events that occurred on this date throug
 4. Present the information in a clear, engaging format
 5. Add interesting details that make the history come alive
 
-Make your response engaging, educational, and well-formatted.
-`;
+Make your response engaging, educational, and well-formatted.`;
 
-    const requestBody = {
-      contents: [{ parts: [{ text: historyPrompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        topK: 40,
-        topP: 0.95,
-        maxOutputTokens: 4096,
-      },
-    };
+  const genAI = new GoogleGenerativeAI(apiKey);
 
-    // ── Model fallback loop ────────────────────────────────────────────────────
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 s total
-
-    let lastStatus = 0;
-    let lastErrorText = '';
-
+  for (const modelName of MODEL_CHAIN) {
     try {
-      for (const model of MODEL_CHAIN) {
-        let response: Response;
+      console.log(`Trying model: ${modelName}`);
+      const model = genAI.getGenerativeModel({ model: modelName });
 
-        try {
-          response = await callModel(model, requestBody, controller.signal);
-        } catch (fetchErr) {
-          if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
-            clearTimeout(timeoutId);
-            return NextResponse.json(
-              { error: 'The request timed out. Please try again.' },
-              { status: 504 }
-            );
-          }
-          // Network error — skip to next model
-          console.warn(`Network error with model ${model}:`, fetchErr);
-          continue;
-        }
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
 
-        // ── Success ────────────────────────────────────────────────────────────
-        if (response.ok) {
-          clearTimeout(timeoutId);
-          const data = await response.json();
+      console.log(`Success with model: ${modelName}`);
+      return NextResponse.json({ text });
 
-          let text = '';
-          if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            text = data.candidates[0].content.parts[0].text;
-          }
-          if (text.startsWith('Assistant:')) {
-            text = text.substring('Assistant:'.length).trim();
-          }
-          if (!text) {
-            text = "Sorry, I couldn't find any significant historical events for that date.";
-          }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`Model ${modelName} failed: ${message}`);
 
-          console.log(`Response from ${model}:`, text.substring(0, 100) + '...');
-          return NextResponse.json({ text });
-        }
-
-        // ── Rate-limited (429) — try next model ────────────────────────────────
-        if (response.status === 429) {
-          lastStatus = 429;
-          lastErrorText = await response.text();
-          console.warn(`Model ${model} is rate-limited (429). Trying next model...`);
-          continue;
-        }
-
-        // ── Other HTTP error — surface immediately ──────────────────────────────
-        lastStatus = response.status;
-        lastErrorText = await response.text();
-        console.error(`Model ${model} returned ${response.status}:`, lastErrorText);
-
-        try {
-          const errorData = JSON.parse(lastErrorText);
-          clearTimeout(timeoutId);
-          return NextResponse.json(
-            { error: `Gemini API error: ${response.status}`, details: errorData },
-            { status: response.status }
-          );
-        } catch {
-          clearTimeout(timeoutId);
-          return NextResponse.json(
-            { error: `Gemini API error: ${response.status}`, details: lastErrorText },
-            { status: response.status }
-          );
-        }
+      // 429 = rate limited → try next model
+      if (message.includes('429') || message.toLowerCase().includes('quota')) {
+        continue;
       }
 
-      // ── All models exhausted (all hit 429) ─────────────────────────────────
-      clearTimeout(timeoutId);
-      console.error('All Gemini models are rate-limited.');
+      // Any other error → surface it immediately
       return NextResponse.json(
-        {
-          error:
-            'The Gemini API is temporarily rate-limited. Please wait a minute and try again.',
-          details: lastErrorText,
-        },
-        { status: 429 }
+        { error: `Gemini API error: ${message}` },
+        { status: 500 }
       );
-
-    } catch (outerErr) {
-      clearTimeout(timeoutId);
-      if (outerErr instanceof Error && outerErr.name === 'AbortError') {
-        return NextResponse.json(
-          { error: 'The request timed out. Please try again.' },
-          { status: 504 }
-        );
-      }
-      throw outerErr;
     }
-
-  } catch (error) {
-    console.error('Error in Gemini API route:', error);
-    return NextResponse.json(
-      { error: 'An unexpected error occurred. Please try again.' },
-      { status: 500 }
-    );
   }
+
+  // All models exhausted
+  return NextResponse.json(
+    { error: 'All Gemini models are rate-limited. Please wait a moment and try again.' },
+    { status: 429 }
+  );
 }
