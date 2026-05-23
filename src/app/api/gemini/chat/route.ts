@@ -3,11 +3,11 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const runtime = 'nodejs';
 
-// Model fallback chain – tried in order on quota/rate-limit errors
+// Modern Model fallback chain - updated to active production models
 const MODEL_CHAIN = [
-  process.env.GEMINI_MODEL || 'gemini-1.5-flash',
-  'gemini-pro',
-  'gemini-1.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
 ];
 
 type Message = {
@@ -64,18 +64,19 @@ Make your response engaging, educational, and well-formatted.`;
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`Model ${modelName} failed: ${message}`);
 
-      // 429 / 404 / quota errors → try next model
+      // Catching any routing or quota failures to slip gracefully to the next tier
       if (
         message.includes('429') ||
         message.includes('404') ||
         message.toLowerCase().includes('quota') ||
-        message.toLowerCase().includes('not found')
+        message.toLowerCase().includes('not found') ||
+        message.toLowerCase().includes('unsupported')
       ) {
         console.warn(`Skipping model ${modelName}, trying next...`);
         continue;
       }
 
-      // Any other error → surface it immediately
+      // Any other structural code error → surface it immediately
       return NextResponse.json(
         { error: `Gemini API error: ${message}` },
         { status: 500 }
@@ -85,7 +86,7 @@ Make your response engaging, educational, and well-formatted.`;
 
   // All models exhausted
   return NextResponse.json(
-    { error: 'All Gemini models are rate-limited. Please wait a moment and try again.' },
+    { error: 'All current Gemini models are hitting tier limits. Please wait a moment and try again.' },
     { status: 429 }
   );
 }
