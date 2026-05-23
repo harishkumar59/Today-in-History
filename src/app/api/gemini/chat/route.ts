@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+// Fallback key matches what's already public in vercel.json
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyA-f1ZAcNvUpH4jBuwqLJaBzTDvnQWC8q8';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 // Fallback model chain — each has a separate free-tier quota
 // If one hits 429 the next one is tried automatically
 const MODEL_CHAIN = [
-  process.env.GEMINI_MODEL || 'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
+  process.env.GEMINI_MODEL || 'gemini-1.5-flash',
   'gemini-1.5-flash-8b',
+  'gemini-1.0-pro',
 ];
 
 // Define message type

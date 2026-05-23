@@ -6,8 +6,8 @@
   "framework": "nextjs",
   "env": {
     "GEMINI_API_KEY": "AIzaSyA-f1ZAcNvUpH4jBuwqLJaBzTDvnQWC8q8",
-    "GEMINI_MODEL": "gemini-2.0-flash",
+    "GEMINI_MODEL": "gemini-1.5-flash",
     "GEMINI_API_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
     "GEMINI_FALLBACK_URL": "https://generativelanguage.googleapis.com"
   }
-} 
+}
